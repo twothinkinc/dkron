@@ -79,7 +79,8 @@ func (h *HTTPTransport) ServeHTTP() {
 
 // APIRoutes registers the api routes on the gin RouterGroup.
 func (h *HTTPTransport) APIRoutes(r *gin.RouterGroup, middleware ...gin.HandlerFunc) {
-	r.GET("/debug/vars", expvar.Handler())
+	// These endpoints are not secured.
+	r.GET("/debug/vars", expvar.Handler()) // maybe we should secure this?
 
 	h.Engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -92,8 +93,16 @@ func (h *HTTPTransport) APIRoutes(r *gin.RouterGroup, middleware ...gin.HandlerF
 		r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	}
 
-	r.GET("/v1", h.indexHandler)
-	v1 := r.Group("/v1")
+	myauthengine := h.Engine.Group("/")
+
+	if h.agent.config.HttpUsername != "" && h.agent.config.HttpPassword != "" {
+		myauthengine = h.Engine.Group("/", gin.BasicAuth(gin.Accounts{
+			h.agent.config.HttpUsername: h.agent.config.HttpPassword,
+		}))
+	}
+
+	myauthengine.GET("/v1", h.indexHandler)
+	v1 := myauthengine.Group("/v1")
 	v1.Use(middleware...)
 	v1.GET("/", h.indexHandler)
 	v1.GET("/members", h.membersHandler)
