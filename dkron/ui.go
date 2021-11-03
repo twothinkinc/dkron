@@ -29,7 +29,15 @@ func (h *HTTPTransport) UI(r *gin.RouterGroup) {
 		}
 	})
 
-	ui := r.Group("/" + uiPathPrefix)
+	myauthengine := h.Engine.Group("/")
+
+	if h.agent.config.HttpUsername != "" && h.agent.config.HttpPassword != "" {
+		myauthengine = h.Engine.Group("/", gin.BasicAuth(gin.Accounts{
+			h.agent.config.HttpUsername: h.agent.config.HttpPassword,
+		}))
+	}
+
+	ui := myauthengine.Group("/" + uiPathPrefix)
 
 	assets, err := fs.Sub(uiDist, "ui-dist")
 	if err != nil {

@@ -30,6 +30,12 @@ type Config struct {
 	// be bound. If not specified, this defaults to all interfaces.
 	HTTPAddr string `mapstructure:"http-addr"`
 
+	// HttpUsername is username to use for HTTP API and UI Authentication
+	HttpUsername string `mapstructure:"username"`
+
+	// MailPassword is the SMTP server password to use for email notifications.
+	HttpPassword string `mapstructure:"password"`
+
 	// Profile is used to select a timing profile for Serf. The supported choices
 	// are "wan", "lan", and "local". The default is "lan"
 	Profile string
@@ -228,6 +234,10 @@ go-sockaddr/template format.`)
 	cmdFlags.String("http-addr", c.HTTPAddr,
 		`Address to bind the UI web server to. Only used when server. The value 
 supports go-sockaddr/template format.`)
+	cmdFlags.String("username", c.HttpUsername,
+		"Username to use for HTTP Authentication")
+	cmdFlags.String("password", c.HttpPassword,
+		"Password to use for HTTP Authentication")
 	cmdFlags.String("profile", c.Profile,
 		"Profile is used to control the timing profiles used")
 	cmdFlags.StringSlice("join", []string{},

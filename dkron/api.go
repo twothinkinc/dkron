@@ -364,7 +364,7 @@ func (h *HTTPTransport) executionsHandler(c *gin.Context) {
 type MId struct {
 	serf.Member
 
-	Id string `json:"id"`
+	Id         string `json:"id"`
 	StatusText string `json:"statusText"`
 }
 
