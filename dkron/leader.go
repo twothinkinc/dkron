@@ -91,7 +91,7 @@ RECONCILE:
 				a.logger.WithError(err).Error("dkron: failed to revoke leadership")
 			}
 
-			a.logger.WithError(err).Fatal("dkron: failed to establish leadership")
+			a.logger.WithError(err).Error("dkron: failed to establish leadership")
 
 			// TODO: review this code path
 			goto WAIT
@@ -144,6 +144,10 @@ WAIT:
 // membership and what is reflected in our strongly consistent store.
 func (a *Agent) reconcile() error {
 	defer metrics.MeasureSince([]string{"dkron", "leader", "reconcile"}, time.Now())
+
+	// TODO: Try to fix https://github.com/distribworks/dkron/issues/998
+	a.sched.Cron.Start()
+
 	members := a.serf.Members()
 	for _, member := range members {
 		if err := a.reconcileMember(member); err != nil {
