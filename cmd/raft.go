@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/distribworks/dkron/v3/dkron"
+	"github.com/distribworks/dkron/v4/dkron"
 	"github.com/ryanuber/columnize"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -59,7 +59,7 @@ var peerID string
 
 var raftRemovePeerCmd = &cobra.Command{
 	Use:   "remove-peer",
-	Short: "Command to list raft peers",
+	Short: "Command to remove a peer from raft",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logrus.NewEntry(logrus.New())

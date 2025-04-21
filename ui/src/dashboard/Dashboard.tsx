@@ -1,5 +1,4 @@
-import * as React from "react";
-import { Card, CardContent, CardHeader } from '@material-ui/core';
+import { Card, CardContent, CardHeader } from '@mui/material';
 import { List, Datagrid, TextField } from 'react-admin';
 import { TagsField } from '../TagsField'
 import Leader from './Leader';
@@ -63,7 +62,7 @@ const Dashboard = () => (
                         <TextField source="Addr" sortable={false} />
                         <TextField source="Port" sortable={false} />
                         <TextField label="Status" source="statusText" sortable={false} />
-                        <TagsField source="Tags" sortable={false} />
+                        <TagsField source="Tags" />
                     </Datagrid>
                 </List>
             </CardContent>

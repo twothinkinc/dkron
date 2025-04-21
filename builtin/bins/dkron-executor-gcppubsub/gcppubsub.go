@@ -5,10 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"cloud.google.com/go/pubsub"
-	dkplugin "github.com/distribworks/dkron/v3/plugin"
-	dktypes "github.com/distribworks/dkron/v3/plugin/types"
+	dkplugin "github.com/distribworks/dkron/v4/plugin"
+	dktypes "github.com/distribworks/dkron/v4/types"
 )
 
 // GCPPubSub plugin publish message to topic when Execute method is called.
@@ -24,12 +25,13 @@ const (
 
 // Execute Process method of the plugin
 // "executor": "gcppubsub",
-// "executor_config": {
-//  "project": "project-id",
-//  "topic": "topic-name",
-//  "data": "aGVsbG8gd29ybGQ=" // Optional. base64 encoded data
-//  "attributes": "{\"hello\":\"world\",\"waka\":\"paka\"}" // JSON serialized attributes
-// }
+//
+//	"executor_config": {
+//	 "project": "project-id",
+//	 "topic": "topic-name",
+//	 "data": "aGVsbG8gd29ybGQ=" // Optional. base64 encoded data
+//	 "attributes": "{\"hello\":\"world\",\"waka\":\"paka\"}" // JSON serialized attributes
+//	}
 func (g *GCPPubSub) Execute(args *dktypes.ExecuteRequest, _ dkplugin.StatusHelper) (*dktypes.ExecuteResponse, error) {
 	out, err := g.ExecuteImpl(args)
 	resp := &dktypes.ExecuteResponse{Output: out}
@@ -39,9 +41,11 @@ func (g *GCPPubSub) Execute(args *dktypes.ExecuteRequest, _ dkplugin.StatusHelpe
 	return resp, nil
 }
 
-// ExecuteImpl do http request
+// ExecuteImpl publish message to PubSub topic
 func (g *GCPPubSub) ExecuteImpl(args *dktypes.ExecuteRequest) ([]byte, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
+
 	projectID := args.Config[configProjectName]
 	topicName := args.Config[configTopicName]
 
@@ -91,7 +95,7 @@ func configToPubSubMessage(config map[string]string) (*pubsub.Message, error) {
 
 	var attributes map[string]string
 	if attributesJSON != "" {
-		if err := json.Unmarshal([]byte(attributesJSON), &attributes); err != nil  {
+		if err := json.Unmarshal([]byte(attributesJSON), &attributes); err != nil {
 			return nil, fmt.Errorf("invalid attributes JSON: %w", err)
 		}
 		msg.Attributes = attributes

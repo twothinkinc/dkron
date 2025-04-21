@@ -1,15 +1,16 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"log"
 	"strings"
 
-	"github.com/Shopify/sarama"
+	"github.com/IBM/sarama"
 	"github.com/armon/circbuf"
 
-	dkplugin "github.com/distribworks/dkron/v3/plugin"
-	dktypes "github.com/distribworks/dkron/v3/plugin/types"
+	dkplugin "github.com/distribworks/dkron/v4/plugin"
+	dktypes "github.com/distribworks/dkron/v4/types"
 )
 
 const (
@@ -25,12 +26,13 @@ type Kafka struct {
 
 // Execute Process method of the plugin
 // "executor": "kafka",
-// "executor_config": {
-//     "brokerAddress": "192.168.59.103:9092", // kafka broker url
-//     "key": "",
-//     "message": "",
-//     "topic": "publishTopic"
-// }
+//
+//	"executor_config": {
+//	    "brokerAddress": "192.168.59.103:9092", // kafka broker url
+//	    "key": "",
+//	    "message": "",
+//	    "topic": "publishTopic"
+//	}
 func (s *Kafka) Execute(args *dktypes.ExecuteRequest, cb dkplugin.StatusHelper) (*dktypes.ExecuteResponse, error) {
 
 	out, err := s.ExecuteImpl(args)
@@ -65,6 +67,37 @@ func (s *Kafka) ExecuteImpl(args *dktypes.ExecuteRequest) ([]byte, error) {
 	config.Producer.Retry.Max = 5
 	config.Producer.Return.Successes = true
 	config.Producer.Return.Errors = true
+
+	if args.Config["tlsEnable"] == "true" {
+		config.Net.TLS.Enable = true
+
+		config.Net.TLS.Config = &tls.Config{}
+		if args.Config["tlsInsecureSkipVerify"] == "true" {
+			config.Net.TLS.Config.InsecureSkipVerify = true
+		}
+	}
+
+	if args.Config["saslUsername"] != "" && args.Config["saslPassword"] != "" {
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = args.Config["saslUsername"]
+		config.Net.SASL.Password = args.Config["saslPassword"]
+		config.Net.SASL.Handshake = true
+
+		if args.Config["saslMechanism"] == "sha512" {
+			config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &XDGSCRAMClient{HashGeneratorFcn: SHA512}
+			}
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+		} else if args.Config["saslMechanism"] == "sha256" {
+			config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &XDGSCRAMClient{HashGeneratorFcn: SHA256}
+			}
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		} else {
+			return output.Bytes(), errors.New("invalid SASL mechanism, must be 'sha256' or 'sha512'")
+		}
+
+	}
 
 	brokers := strings.Split(args.Config["brokerAddress"], ",")
 	producer, err := sarama.NewSyncProducer(brokers, config)
