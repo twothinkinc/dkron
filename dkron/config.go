@@ -143,8 +143,17 @@ type Config struct {
 	// MailSubjectPrefix is the email subject prefix string to use for email notifications.
 	MailSubjectPrefix string `mapstructure:"mail-subject-prefix"`
 
-	// WebhookURL is the URL to call for notifications.
-	WebhookURL string `mapstructure:"webhook-url"`
+	// PreWebhookURL is the endpoint to call for notifications.
+	PreWebhookEndpoint string `mapstructure:"pre-webhook-endpoint"`
+
+	// PreWebhookPayload is the body template of the request for notifications.
+	PreWebhookPayload string `mapstructure:"pre-webhook-payload"`
+
+	// PreWebhookHeaders are the headers to use when calling the webhook for notifications.
+	PreWebhookHeaders []string `mapstructure:"pre-webhook-headers"`
+
+	// WebhookEndpoint is the URL to call for notifications.
+	WebhookEndpoint string `mapstructure:"webhook-endpoint"`
 
 	// WebhookPayload is the body template of the request for notifications.
 	WebhookPayload string `mapstructure:"webhook-payload"`
@@ -174,6 +183,9 @@ type Config struct {
 
 	// DisableUsageStats disable sending anonymous usage stats
 	DisableUsageStats bool `mapstructure:"disable-usage-stats"`
+
+	// CronitorEndpoint is the endpoint to call for cronitor notifications.
+	CronitorEndpoint string `mapstructure:"cronitor-endpoint"`
 }
 
 // DefaultBindPort is the default port that dkron will use for Serf communication
@@ -182,6 +194,8 @@ const (
 	DefaultRPCPort       int           = 6868
 	DefaultRetryInterval time.Duration = time.Second * 30
 )
+
+var ErrResolvingHost = errors.New("error resolving hostname")
 
 // DefaultConfig returns a Config struct pointer with sensible
 // default settings.
@@ -309,9 +323,14 @@ Format there: https://golang.org/pkg/time/#ParseDuration`)
 	cmdFlags.String("mail-from", "", "From email address to use")
 	cmdFlags.String("mail-payload", "", "Notification mail payload")
 	cmdFlags.String("mail-subject-prefix", c.MailSubjectPrefix, "Notification mail subject prefix")
-	cmdFlags.String("webhook-url", "", "Webhook url to call for notifications")
+	cmdFlags.String("pre-webhook-endpoint", "", "Pre-webhook endpoint to call for notifications")
+	cmdFlags.String("pre-webhook-payload", "", "Body of the POST request to send on pre-webhook call")
+	cmdFlags.StringSlice("pre-webhook-headers", []string{}, "Headers to use when calling the pre-webhook. Can be specified multiple times")
+	cmdFlags.String("webhook-endpoint", "", "Webhook endpoint to call for notifications")
+	cmdFlags.String("webhook-url", "", "Webhook url to call for notifications. Deprecated, use webhook-endpoint instead")
 	cmdFlags.String("webhook-payload", "", "Body of the POST request to send on webhook call")
 	cmdFlags.StringSlice("webhook-headers", []string{}, "Headers to use when calling the webhook URL. Can be specified multiple times")
+	cmdFlags.String("cronitor-endpoint", "", "Cronitor endpoint to call for notifications")
 
 	// Observability
 	cmdFlags.String("dog-statsd-addr", "", "DataDog Agent address")
@@ -337,14 +356,14 @@ func (c *Config) normalizeAddrs() error {
 	if c.HTTPAddr != "" {
 		ipStr, err := ParseSingleIPTemplate(c.HTTPAddr)
 		if err != nil {
-			return fmt.Errorf("bind address resolution failed: %v", err)
+			return fmt.Errorf("HTTP address resolution failed: %v", err)
 		}
 		c.HTTPAddr = ipStr
 	}
 
 	addr, err := normalizeAdvertise(c.AdvertiseAddr, c.BindAddr, DefaultBindPort, c.DevMode)
 	if err != nil {
-		return fmt.Errorf("failed to parse HTTP advertise address (%v, %v, %v, %v): %v", c.AdvertiseAddr, c.BindAddr, DefaultBindPort, c.DevMode, err)
+		return fmt.Errorf("failed to parse advertise address (%v, %v, %v, %v): %w", c.AdvertiseAddr, c.BindAddr, DefaultBindPort, c.DevMode, err)
 	}
 	c.AdvertiseAddr = addr
 
@@ -403,10 +422,10 @@ func normalizeAdvertise(addr string, bind string, defport int, dev bool) (string
 		return addr, nil
 	}
 
-	// Fallback to bind address first, and then try resolving the local hostname
+	// TODO: Revisit this as the lookup doesn't work with IP addresses
 	ips, err := net.LookupIP(bind)
 	if err != nil {
-		return "", fmt.Errorf("Error resolving bind address %q: %v", bind, err)
+		return "", ErrResolvingHost //fmt.Errorf("Error resolving bind address %q: %v", bind, err)
 	}
 
 	// Return the first non-localhost unicast address

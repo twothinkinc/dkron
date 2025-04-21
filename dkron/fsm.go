@@ -3,10 +3,10 @@ package dkron
 import (
 	"io"
 
-	dkronpb "github.com/distribworks/dkron/v3/plugin/types"
-	"github.com/golang/protobuf/proto"
+	dkronpb "github.com/distribworks/dkron/v4/types"
 	"github.com/hashicorp/raft"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/proto"
 )
 
 // MessageType is the type to encode FSM commands.
@@ -149,7 +149,7 @@ type dkronSnapshot struct {
 
 func (d *dkronSnapshot) Persist(sink raft.SnapshotSink) error {
 	if err := d.store.Snapshot(sink); err != nil {
-		sink.Cancel()
+		_ = sink.Cancel()
 		return err
 	}
 

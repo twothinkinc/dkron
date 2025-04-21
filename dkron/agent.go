@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	metrics "github.com/armon/go-metrics"
 	"github.com/devopsfaith/krakend-usage/client"
-	"github.com/distribworks/dkron/v3/plugin"
-	proto "github.com/distribworks/dkron/v3/plugin/types"
+	metrics "github.com/hashicorp/go-metrics"
+	"github.com/distribworks/dkron/v4/plugin"
+	proto "github.com/distribworks/dkron/v4/types"
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/raft"
@@ -49,6 +49,12 @@ var (
 
 	runningExecutions sync.Map
 )
+
+type RaftStore interface {
+	raft.StableStore
+	raft.LogStore
+	Close() error
+}
 
 // Node is a shorter, more descriptive name for serf.Member
 type Node = serf.Member
@@ -96,7 +102,7 @@ type Agent struct {
 	// raftLayer provides network layering of the raft RPC along with
 	// the Dkron gRPC transport layer.
 	raftLayer     *RaftLayer
-	raftStore     *raftboltdb.BoltStore
+	raftStore     RaftStore
 	raftInmem     *raft.InmemStore
 	raftTransport *raft.NetworkTransport
 
@@ -107,9 +113,10 @@ type Agent struct {
 
 	// peers is used to track the known Dkron servers. This is
 	// used for region forwarding and clustering.
-	peers      map[string][]*ServerParts
-	localPeers map[raft.ServerAddress]*ServerParts
-	peerLock   sync.RWMutex
+	peers        map[string][]*ServerParts
+	localPeers   map[raft.ServerAddress]*ServerParts
+	peerLock     sync.RWMutex
+	serverLookup *ServerLookup
 
 	activeExecutions sync.Map
 
@@ -136,8 +143,9 @@ type AgentOption func(agent *Agent)
 // and running a Dkron instance.
 func NewAgent(config *Config, options ...AgentOption) *Agent {
 	agent := &Agent{
-		config:      config,
-		retryJoinCh: make(chan error),
+		config:       config,
+		retryJoinCh:  make(chan error),
+		serverLookup: NewServerLookup(),
 	}
 
 	for _, option := range options {
@@ -157,7 +165,9 @@ func (a *Agent) Start() error {
 	rand.Seed(time.Now().UnixNano())
 
 	// Normalize configured addresses
-	a.config.normalizeAddrs()
+	if err := a.config.normalizeAddrs(); err != nil && !errors.Is(err, ErrResolvingHost) {
+		return err
+	}
 
 	s, err := a.setupSerf()
 	if err != nil {
@@ -169,7 +179,10 @@ func (a *Agent) Start() error {
 	if len(a.config.RetryJoinLAN) > 0 {
 		a.retryJoinLAN()
 	} else {
-		a.join(a.config.StartJoin, true)
+		_, err := a.join(a.config.StartJoin, true)
+		if err != nil {
+			a.logger.WithError(err).WithField("servers", a.config.StartJoin).Warn("agent: Can not join")
+		}
 	}
 
 	if err := initMetrics(a); err != nil {
@@ -204,7 +217,11 @@ func (a *Agent) Start() error {
 		grpcServer := grpc.NewServer(opts...)
 		as := NewAgentServer(a, a.logger)
 		proto.RegisterAgentServer(grpcServer, as)
-		go grpcServer.Serve(l)
+		go func() {
+			if err := grpcServer.Serve(l); err != nil {
+				a.logger.Fatal(err)
+			}
+		}()
 	}
 
 	if a.GRPCClient == nil {
@@ -214,7 +231,9 @@ func (a *Agent) Start() error {
 	tags := a.serf.LocalMember().Tags
 	tags["rpc_addr"] = a.advertiseRPCAddr() // Address that clients will use to RPC to servers
 	tags["port"] = strconv.Itoa(a.config.AdvertiseRPCPort)
-	a.serf.SetTags(tags)
+	if err := a.serf.SetTags(tags); err != nil {
+		return fmt.Errorf("agent: Error setting tags: %w", err)
+	}
 
 	go a.eventLoop()
 	a.ready = true
@@ -244,14 +263,17 @@ func (a *Agent) JoinLAN(addrs []string) (int, error) {
 func (a *Agent) Stop() error {
 	a.logger.Info("agent: Called member stop, now stopping")
 
-	if a.config.Server && a.sched.Started() {
-		a.sched.Stop()
-		a.sched.ClearCron()
-	}
-
 	if a.config.Server {
-		a.raft.Shutdown()
-		a.Store.Shutdown()
+		if a.sched.Started() {
+			<-a.sched.Stop().Done()
+		}
+
+		// TODO: Check why Shutdown().Error() is not working
+		_ = a.raft.Shutdown()
+
+		if err := a.Store.Shutdown(); err != nil {
+			return err
+		}
 	}
 
 	if err := a.serf.Leave(); err != nil {
@@ -296,7 +318,13 @@ func (a *Agent) setupRaft() error {
 		logger = a.logger.Logger.Writer()
 	}
 
-	transport := raft.NewNetworkTransport(a.raftLayer, 3, raftTimeout, logger)
+	transConfig := &raft.NetworkTransportConfig{
+		Stream:                a.raftLayer,
+		MaxPool:               3,
+		Timeout:               raftTimeout,
+		ServerAddressProvider: a.serverLookup,
+	}
+	transport := raft.NewNetworkTransportWithConfig(transConfig)
 	a.raftTransport = transport
 
 	config := raft.DefaultConfig()
@@ -334,17 +362,19 @@ func (a *Agent) setupRaft() error {
 		}
 
 		// Create the BoltDB backend
-		s, err := raftboltdb.NewBoltStore(filepath.Join(a.config.DataDir, "raft", "raft.db"))
-		if err != nil {
-			return fmt.Errorf("error creating new raft store: %s", err)
+		if a.raftStore == nil {
+			s, err := raftboltdb.NewBoltStore(filepath.Join(a.config.DataDir, "raft", "raft.db"))
+			if err != nil {
+				return fmt.Errorf("error creating new raft store: %s", err)
+			}
+			a.raftStore = s
 		}
-		a.raftStore = s
-		stableStore = s
+		stableStore = a.raftStore
 
 		// Wrap the store in a LogCache to improve performance
-		cacheStore, err := raft.NewLogCache(raftLogCacheSize, s)
+		cacheStore, err := raft.NewLogCache(raftLogCacheSize, a.raftStore)
 		if err != nil {
-			s.Close()
+			a.raftStore.Close()
 			return err
 		}
 		logStore = cacheStore
@@ -688,7 +718,10 @@ func (a *Agent) eventLoop() {
 					a.localMemberEvent(me)
 				case serf.EventMemberReap:
 					a.localMemberEvent(me)
-				case serf.EventMemberUpdate, serf.EventUser, serf.EventQuery: // Ignore
+				case serf.EventMemberUpdate:
+					a.lanNodeUpdate(me)
+					a.localMemberEvent(me)
+				case serf.EventUser, serf.EventQuery: // Ignore
 				default:
 					a.logger.WithField("event", e.String()).Warn("agent: Unhandled serf event")
 				}

@@ -1,13 +1,15 @@
-import * as React from 'react'
-import { Chip } from '@material-ui/core';
+import { Chip } from '@mui/material';
+import { useRecordContext } from 'react-admin';
 
-export const TagsField = ({ record }: any) => (
-    <ul>
-        {Object.keys(record.Tags).map(key => (
-            <Chip label={key+": "+record.Tags[key]} />
-        ))}
-    </ul>
-)
-TagsField.defaultProps = {
-    addLabel: true
+export const TagsField = () => {
+    const record = useRecordContext();
+    if (record === undefined) {
+		return null
+    } else {
+        return <ul>
+            {Object.keys(record.Tags).map(key => (
+                <Chip label={key+": "+record.Tags[key]} />
+            ))}
+        </ul>
+    }
 };

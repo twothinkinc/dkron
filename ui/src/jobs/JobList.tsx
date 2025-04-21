@@ -1,10 +1,8 @@
-import * as React from "react";
 import {
     Datagrid,
     TextField,
     NumberField,
     DateField,
-    BooleanField,
     EditButton,
     Filter,
     TextInput,
@@ -18,7 +16,8 @@ import { Fragment } from 'react';
 import BulkRunButton from "./BulkRunButton"
 import BulkToggleButton from "./BulkToggleButton"
 import StatusField from "./StatusField"
-import { makeStyles } from '@material-ui/core/styles';
+import EnabledField from "./EnabledField"
+import { makeStyles } from '@mui/styles';
 
 const JobFilter = (props: any) => (
     <Filter {...props}>
@@ -32,11 +31,11 @@ const JobFilter = (props: any) => (
     </Filter>
 );
 
-const JobBulkActionButtons = (props: any) => (
+const JobBulkActionButtons = () => (
     <Fragment>
-        <BulkRunButton {...props} />
-        <BulkToggleButton {...props} />
-        <BulkDeleteButton {...props} />
+        <BulkRunButton />
+        <BulkToggleButton />
+        <BulkDeleteButton />
     </Fragment>
 );
 
@@ -57,8 +56,8 @@ const useStyles = makeStyles(theme => ({
 const JobList = (props: any) => {
     const classes = useStyles();
     return (
-        <List {...props} filters={<JobFilter />} bulkActionButtons={<JobBulkActionButtons />} pagination={<JobPagination />}>
-            <Datagrid rowClick="show" classes={{rowCell: classes.cell}}>
+        <List {...props} filters={<JobFilter />} pagination={<JobPagination />}>
+            <Datagrid rowClick="show" classes={{rowCell: classes.cell}} bulkActionButtons={<JobBulkActionButtons />}>
                 <TextField source="id"
                     cellClassName={classes.hiddenOnSmallScreens}
                     headerClassName={classes.hiddenOnSmallScreens} />
@@ -75,7 +74,7 @@ const JobList = (props: any) => {
                     headerClassName={classes.hiddenOnSmallScreens} />
                 <DateField source="last_success" showTime />
                 <DateField source="last_error" showTime />
-                <BooleanField source="disabled" sortable={false} />
+                <EnabledField source="disabled" label="Enabled" sortable={false} />
                 <NumberField source="retries" sortable={false} />
                 <StatusField source="status" sortable={false} />
                 <DateField source="next" showTime />
